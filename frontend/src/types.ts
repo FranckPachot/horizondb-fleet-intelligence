@@ -47,11 +47,15 @@ export interface DatabaseCapabilities {
   postgis_version: string | null
   vector_version: string | null
   diskann_version: string | null
+  diskann_spherical_quantization: boolean
+  diskann_sq_bits: number | null
+  diskann_sq_training_samples: number | null
   azure_ai_version: string | null
   shipment_count: number
   azure_embedding_count: number
   embedding_mode: 'azure_openai'
   embedding_model_alias: string
+  agent_framework: true
   ai_in_database: true
   chat_model: string
   detail: string | null
@@ -71,9 +75,14 @@ export interface SearchResponse {
   query: string
   search_mode: 'spatial_semantic_diskann'
   shipments: Shipment[]
+}
+
+export interface ChatResponse extends SearchResponse {
   answer: string
+  agent_framework: true
   ai_in_database: true
   chat_model: string
+  explain: ExplainPlan | null
 }
 
 export interface ExplainPlan {

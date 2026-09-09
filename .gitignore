@@ -25,6 +25,12 @@ frontend/dist/
 .idea/
 .DS_Store
 Thumbs.db
+~$*.pptx
+
+# Azure Developer CLI and generated Bicep output
+.azure/
+infra/main.json
+infra/modules/*.json
 
 # Demo video intermediates
 demo/work/

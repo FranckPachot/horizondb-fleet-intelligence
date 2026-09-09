@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HorizonDB Fleet Intelligence Demo</title>
+  <style>
+    :root {
+      color: #172335;
+      background: #dfe6eb;
+      font-family: "Bahnschrift", "Aptos", sans-serif;
+      font-synthesis: none;
+      --navy: #172335;
+      --blue: #0876cf;
+      --green: #078657;
+      --amber: #d97808;
+      --coral: #ce3653;
+      --paper: #f6f8fa;
+      --muted: #5e6f82;
+      --line: #c8d3dd;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { display: grid; place-items: center; }
+    button { font: inherit; }
+
+    #deck {
+      width: 1920px;
+      height: 1080px;
+      transform-origin: center;
+    }
+
+    .slide {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      display: none;
+      overflow: hidden;
+      padding: 74px 92px 64px;
+      background-color: var(--paper);
+      background-image:
+        linear-gradient(rgba(23, 35, 53, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 35, 53, 0.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+
+    .slide.active { display: block; }
+    .slide.dark { color: #f7fbff; background: var(--navy); }
+
+    .kicker {
+      margin: 0 0 14px;
+      color: var(--green);
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .dark .kicker { color: #67dfb4; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 1500px; margin-bottom: 20px; font-size: 70px; line-height: 1.05; letter-spacing: 0; }
+    h2 { margin-bottom: 14px; font-size: 38px; line-height: 1.12; letter-spacing: 0; }
+    h3 { margin-bottom: 9px; font-size: 27px; line-height: 1.18; letter-spacing: 0; }
+
+    .lead {
+      max-width: 1380px;
+      color: var(--muted);
+      font-size: 31px;
+      line-height: 1.42;
+    }
+
+    .dark .lead { color: #bfd0dd; }
+
+    .brand {
+      position: absolute;
+      top: 48px;
+      right: 92px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      color: var(--muted);
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      color: white;
+      background: var(--navy);
+      font: 700 15px/1 "Cascadia Mono", Consolas, monospace;
+    }
+
+    .dark .brand { color: #c7d6e2; }
+    .dark .brand-mark { color: var(--navy); background: #67dfb4; }
+
+    .footer {
+      position: absolute;
+      left: 92px;
+      right: 92px;
+      bottom: 34px;
+      display: flex;
+      justify-content: space-between;
+      color: #718092;
+      font-size: 17px;
+    }
+
+    .dark .footer { color: #91a8ba; }
+
+    .title {
+      padding: 0;
+      background: center / cover no-repeat url("media/app-overview.png");
+    }
+
+    .title::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 29, 45, 0.88);
+    }
+
+    .title-content {
+      position: relative;
+      z-index: 1;
+      width: 1320px;
+      padding: 190px 0 0 130px;
+    }
+
+    .title h1 { margin-bottom: 30px; font-size: 92px; }
+    .title .lead { max-width: 1190px; font-size: 35px; }
+
+    .title-tags {
+      display: flex;
+      gap: 12px;
+      margin-top: 54px;
+    }
+
+    .title-tags span {
+      padding: 13px 18px;
+      border: 1px solid rgba(207, 225, 237, 0.38);
+      border-radius: 5px;
+      color: #e9f2f8;
+      background: rgba(255, 255, 255, 0.08);
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .agenda-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px 34px;
+      margin-top: 52px;
+    }
+
+    .agenda-item {
+      min-height: 145px;
+      display: grid;
+      grid-template-columns: 70px minmax(0, 1fr);
+      align-items: center;
+      gap: 20px;
+      padding: 25px 30px;
+      border-left: 8px solid var(--blue);
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: 0 12px 28px rgba(23, 35, 53, 0.08);
+    }
+
+    .agenda-item:nth-child(2) { border-left-color: var(--green); }
+    .agenda-item:nth-child(3) { border-left-color: var(--amber); }
+    .agenda-item:nth-child(4) { border-left-color: var(--coral); }
+    .agenda-item b { color: var(--blue); font: 700 30px/1 "Cascadia Mono", Consolas, monospace; }
+    .agenda-item strong { display: block; margin-bottom: 7px; font-size: 29px; }
+    .agenda-item span { color: var(--muted); font-size: 21px; line-height: 1.35; }
+
+    .scenario-band {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+      margin-top: 72px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .scenario {
+      min-height: 335px;
+      padding: 44px 40px;
+      border-right: 1px solid var(--line);
+    }
+
+    .scenario:last-child { border-right: 0; }
+    .scenario-number { color: var(--green); font: 700 24px/1 "Cascadia Mono", Consolas, monospace; }
+    .scenario h3 { margin-top: 45px; font-size: 33px; }
+    .scenario p { color: var(--muted); font-size: 23px; line-height: 1.46; }
+
+    .architecture-grid {
+      display: grid;
+      grid-template-columns: 430px 105px 520px 105px 430px;
+      align-items: center;
+      margin-top: 58px;
+    }
+
+    .branch-stack { display: grid; gap: 20px; }
+
+    .arch-node {
+      min-height: 178px;
+      padding: 28px 30px;
+      border: 1px solid var(--line);
+      border-top: 7px solid var(--blue);
+      border-radius: 7px;
+      background: white;
+      box-shadow: 0 16px 34px rgba(23, 35, 53, 0.09);
+    }
+
+    .arch-node.agent { border-top-color: var(--amber); }
+    .arch-node.api { min-height: 380px; display: grid; align-content: center; border-top-color: var(--green); }
+    .arch-node.database { min-height: 380px; display: grid; align-content: center; border-top-color: var(--coral); }
+    .arch-node p { margin: 0; color: var(--muted); font-size: 21px; line-height: 1.42; }
+    .arch-node code { color: var(--blue); font: 700 18px/1.3 "Cascadia Mono", Consolas, monospace; }
+    .arrow { color: var(--blue); text-align: center; font-size: 66px; }
+
+    .architecture-note {
+      margin-top: 40px;
+      padding: 22px 28px;
+      border-left: 7px solid var(--green);
+      background: #e7f5ef;
+      font-size: 24px;
+      line-height: 1.35;
+    }
+
+    .feature-table {
+      width: 100%;
+      margin-top: 46px;
+      border-collapse: collapse;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 16px 36px rgba(23, 35, 53, 0.08);
+    }
+
+    .feature-table th, .feature-table td {
+      padding: 22px 26px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .feature-table th { color: white; background: var(--navy); font-size: 21px; }
+    .feature-table td { font-size: 21px; line-height: 1.35; }
+    .feature-table td:first-child { width: 300px; color: var(--green); font-weight: 700; }
+    .feature-table td:nth-child(2) { width: 580px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 19px; }
+    .feature-table tr:last-child td { border-bottom: 0; }
+
+    .divider {
+      place-items: center;
+      padding: 0;
+      text-align: center;
+    }
+
+    .slide.divider.active { display: grid; }
+
+    .divider-content { max-width: 1480px; }
+    .divider-number { color: #67dfb4; font: 700 34px/1 "Cascadia Mono", Consolas, monospace; }
+    .divider h1 { margin: 42px auto 26px; font-size: 88px; }
+    .divider .lead { margin: 0 auto; font-size: 32px; }
+
+    .screen-slide { padding: 42px 52px 48px; background: #e8edf1; }
+    .screen-header { height: 90px; display: flex; align-items: center; justify-content: space-between; }
+    .screen-header h1 { margin: 0; font-size: 42px; }
+    .screen-header p { margin: 0; color: var(--muted); font-size: 20px; }
+
+    .screen-layout {
+      height: 898px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 24px;
+    }
+
+    .screen-layout img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      border: 1px solid #b9c5cf;
+      border-radius: 6px;
+      background: white;
+      box-shadow: 0 18px 44px rgba(23, 35, 53, 0.14);
+    }
+
+    .screen-notes {
+      display: grid;
+      align-content: center;
+      gap: 18px;
+    }
+
+    .screen-note {
+      padding: 20px 18px;
+      border-left: 6px solid var(--blue);
+      background: white;
+      font-size: 18px;
+      line-height: 1.38;
+    }
+
+    .screen-note.green { border-left-color: var(--green); }
+    .screen-note.amber { border-left-color: var(--amber); }
+    .screen-note.coral { border-left-color: var(--coral); }
+    .screen-note strong { display: block; margin-bottom: 5px; font-size: 21px; }
+
+    .code-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 30px;
+      margin-top: 38px;
+    }
+
+    .code-panel { min-width: 0; }
+    .file-label { margin-bottom: 10px; color: var(--green); font: 700 19px/1 "Cascadia Mono", Consolas, monospace; }
+    pre {
+      height: 670px;
+      margin: 0;
+      padding: 28px;
+      overflow: hidden;
+      border-radius: 7px;
+      color: #e8f3fa;
+      background: #142d2b;
+      font: 18px/1.45 "Cascadia Mono", Consolas, monospace;
+      white-space: pre-wrap;
+      box-shadow: 0 18px 42px rgba(23, 35, 53, 0.16);
+    }
+
+    .code-panel:last-child pre { font-size: 16px; line-height: 1.4; }
+
+    .code-key { color: #7dd3fc; }
+    .code-value { color: #fde68a; }
+    .code-call { color: #86efac; }
+
+    .code-insight h1 { max-width: 1540px; font-size: 60px; }
+
+    .code-insight-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 30px;
+      margin-top: 34px;
+    }
+
+    .insight-panel {
+      min-width: 0;
+      padding: 26px 28px;
+      border: 1px solid var(--line);
+      border-top: 7px solid var(--blue);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 15px 36px rgba(23, 35, 53, 0.09);
+    }
+
+    .insight-panel.amber { border-top-color: var(--amber); }
+    .insight-panel.green { border-top-color: var(--green); }
+    .insight-panel.coral { border-top-color: var(--coral); }
+    .insight-panel h3 { margin-bottom: 5px; font-size: 29px; }
+    .insight-panel > p { margin-bottom: 16px; color: var(--muted); font: 700 17px/1.3 "Cascadia Mono", Consolas, monospace; }
+
+    pre.insight-code {
+      height: 405px;
+      padding: 22px 24px;
+      border-radius: 5px;
+      font-size: 17px;
+      line-height: 1.42;
+      box-shadow: none;
+    }
+
+    .guard-callout {
+      margin-top: 26px;
+      padding: 20px 26px;
+      border-left: 7px solid var(--green);
+      background: #e6f6ef;
+      font-size: 22px;
+      line-height: 1.35;
+    }
+
+    .guard-callout strong { color: var(--green); }
+
+    .loop-grid {
+      display: grid;
+      grid-template-columns: 1fr 70px 1fr 70px 1fr;
+      align-items: stretch;
+      margin-top: 42px;
+    }
+
+    .loop-step {
+      min-width: 0;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-top: 7px solid var(--blue);
+      border-radius: 7px;
+      background: white;
+      box-shadow: 0 14px 32px rgba(23, 35, 53, 0.08);
+    }
+
+    .loop-step:nth-of-type(3) { border-top-color: var(--green); }
+    .loop-step:nth-of-type(5) { border-top-color: var(--amber); }
+    .loop-number { color: var(--blue); font: 700 23px/1 "Cascadia Mono", Consolas, monospace; }
+    .loop-step h3 { margin-top: 22px; }
+    .loop-step p { margin-bottom: 0; color: var(--muted); font-size: 21px; line-height: 1.4; }
+    .loop-arrow { display: grid; place-items: center; color: var(--blue); font-size: 48px; }
+
+    .adapter-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 30px;
+      margin-top: 30px;
+    }
+
+    .adapter-grid pre {
+      height: 310px;
+      padding: 22px 24px;
+      font-size: 16px;
+      line-height: 1.4;
+      box-shadow: none;
+    }
+
+    .query-layout {
+      display: grid;
+      grid-template-columns: 1.12fr 0.88fr;
+      gap: 32px;
+      margin-top: 34px;
+    }
+
+    .query-layout pre {
+      height: 690px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .plan-stack { display: grid; align-content: start; gap: 18px; }
+    .plan-choice {
+      padding: 24px 26px;
+      border: 1px solid var(--line);
+      border-left: 8px solid var(--green);
+      background: white;
+      box-shadow: 0 12px 28px rgba(23, 35, 53, 0.08);
+    }
+
+    .plan-choice.diskann { border-left-color: var(--amber); }
+    .plan-choice h3 { margin-bottom: 12px; }
+    .plan-choice code { display: block; color: var(--navy); font: 700 17px/1.5 "Cascadia Mono", Consolas, monospace; }
+    .plan-choice p { margin: 12px 0 0; color: var(--muted); font-size: 19px; line-height: 1.4; }
+
+    .plan-note {
+      padding: 22px 24px;
+      border-radius: 6px;
+      color: white;
+      background: var(--navy);
+      font-size: 20px;
+      line-height: 1.4;
+    }
+
+    .setup-flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 34px;
+    }
+
+    .setup-step {
+      min-height: 190px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-top: 6px solid var(--blue);
+      background: white;
+    }
+
+    .setup-step:nth-child(2) { border-top-color: var(--green); }
+    .setup-step:nth-child(3) { border-top-color: var(--amber); }
+    .setup-step:nth-child(4) { border-top-color: var(--coral); }
+    .setup-step b { color: var(--blue); font: 700 20px/1 "Cascadia Mono", Consolas, monospace; }
+    .setup-step strong { display: block; margin: 20px 0 8px; font-size: 25px; }
+    .setup-step span { color: var(--muted); font-size: 18px; line-height: 1.35; }
+
+    .setup-code-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .setup-code-grid pre {
+      height: 350px;
+      padding: 22px 24px;
+      font-size: 16px;
+      line-height: 1.4;
+      box-shadow: none;
+    }
+
+    .recap-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 60px;
+      margin-top: 52px;
+    }
+
+    .recap-list { display: grid; gap: 20px; }
+    .recap-item { padding: 24px 28px; border-left: 7px solid var(--green); background: rgba(255, 255, 255, 0.9); font-size: 24px; line-height: 1.35; }
+    .recap-item strong { display: block; margin-bottom: 5px; font-size: 27px; }
+
+    .value-block {
+      min-height: 440px;
+      display: grid;
+      align-content: center;
+      padding: 44px;
+      border-radius: 7px;
+      color: white;
+      background: var(--navy);
+    }
+
+    .value-block strong { font-size: 34px; }
+    .value-block p { margin: 22px 0 0; color: #c5d5e1; font-size: 25px; line-height: 1.48; }
+
+    .nav-hint {
+      position: fixed;
+      right: 18px;
+      bottom: 14px;
+      z-index: 20;
+      padding: 7px 10px;
+      border-radius: 4px;
+      color: #dce8f0;
+      background: rgba(23, 35, 53, 0.82);
+      font-size: 13px;
+      pointer-events: none;
+    }
+
+    body.rendering .nav-hint { display: none; }
+  </style>
+</head>
+<body>
+  <main id="deck">
+    <section class="slide title dark" id="title">
+      <div class="title-content">
+        <p class="kicker">Customer technical demo</p>
+        <h1>HorizonDB Fleet Intelligence</h1>
+        <p class="lead">Spatial operations, spherical-quantized vector search, and a tool-driven gpt-5.4 agent over one operational data store.</p>
+        <div class="title-tags">
+          <span>PostGIS</span><span>pgvector</span><span>SQ4 DiskANN</span><span>Microsoft Agent Framework</span><span>React + Vite</span>
+        </div>
+      </div>
+      <div class="footer"><span>Fleet, dispatch, and security operations</span><span>1 / 16</span></div>
+    </section>
+
+    <section class="slide" id="agenda">
+      <div class="brand"><span class="brand-mark">FI</span>Azure HorizonDB</div>
+      <p class="kicker">Agenda</p>
+      <h1>From customer problem to inspectable execution</h1>
+      <p class="lead">A concise path through the scenario, architecture, live application, query plans, and implementation.</p>
+      <div class="agenda-grid">
+        <div class="agenda-item"><b>01</b><div><strong>Context</strong><span>Fleet tracking and dispatch decisions</span></div></div>
+        <div class="agenda-item"><b>02</b><div><strong>HorizonDB stack</strong><span>Spatial, vector, AI, and indexes</span></div></div>
+        <div class="agenda-item"><b>03</b><div><strong>Live workflows</strong><span>Criteria search beside a prompt-only agent</span></div></div>
+        <div class="agenda-item"><b>04</b><div><strong>Evidence and code</strong><span>Plans, tool loop, and reusable pattern</span></div></div>
+      </div>
+      <div class="footer"><span>Agenda</span><span>2 / 16</span></div>
+    </section>
+
+    <section class="slide" id="context">
+      <div class="brand"><span class="brand-mark">FI</span>Customer context</div>
+      <p class="kicker">Why this sample</p>
+      <h1>Location alone does not answer an operations question</h1>
+      <p class="lead">Operators need to combine where an asset is with what it carries, its current condition, and the intent behind a request.</p>
+      <div class="scenario-band">
+        <div class="scenario"><span class="scenario-number">01</span><h3>B2B shipment tracking</h3><p>Find cargo by route, status, ETA, proximity, and semantic description without moving operational data.</p></div>
+        <div class="scenario"><span class="scenario-number">02</span><h3>Bus and taxi dispatch</h3><p>Rank available units by service intent and geographic reach, then inspect the evidence behind the recommendation.</p></div>
+        <div class="scenario"><span class="scenario-number">03</span><h3>Security response</h3><p>Ground dispatch decisions in current position, service area, incident meaning, and live operational state.</p></div>
+      </div>
+      <div class="footer"><span>Reusable telecom and fleet pattern</span><span>3 / 16</span></div>
+    </section>
+
+    <section class="slide" id="architecture">
+      <div class="brand"><span class="brand-mark">FI</span>Application architecture</div>
+      <p class="kicker">Two paths, one repository</p>
+      <h1>Keep deterministic search separate from agent reasoning</h1>
+      <div class="architecture-grid">
+        <div class="branch-stack">
+          <div class="arch-node"><h3>Left: criteria workbench</h3><code>POST /api/search</code><p>Prompt, status, ETA, center, and radius are explicit operator inputs.</p></div>
+          <div class="arch-node agent"><h3>Right: gpt-5.4 agent</h3><code>POST /api/chat</code><p>Only a natural-language prompt. Agent Framework chooses tool arguments.</p></div>
+        </div>
+        <div class="arrow">&#8594;</div>
+        <div class="arch-node api"><h3>FastAPI + Microsoft Agent Framework</h3><p>Both paths call the same async Psycopg repository. The agent must invoke one typed <code>search_shipments</code> tool before answering.</p></div>
+        <div class="arrow">&#8594;</div>
+        <div class="arch-node database"><h3>Azure HorizonDB</h3><p>Relational truth, PostGIS geometry, vector embeddings, SQ DiskANN retrieval, model registry, and gpt-5.4 inference stay behind one database connection.</p></div>
+      </div>
+      <div class="architecture-note">The UI controls on the left never leak into the agent request. The agent response returns the exact tool rows used to ground its answer.</div>
+      <div class="footer"><span>React + Vite / FastAPI / Psycopg 3</span><span>4 / 16</span></div>
+    </section>
+
+    <section class="slide" id="features">
+      <div class="brand"><span class="brand-mark">FI</span>HorizonDB capabilities</div>
+      <p class="kicker">One operational database</p>
+      <h1>Every HorizonDB feature used in the sample</h1>
+      <table class="feature-table">
+        <thead><tr><th>Capability</th><th>Concrete implementation</th><th>Role in the workflow</th></tr></thead>
+        <tbody>
+          <tr><td>PostGIS</td><td>geometry(Point, 4326), GiST, ST_DWithin</td><td>Stores routes and current positions; applies map-selected radius filters.</td></tr>
+          <tr><td>azure_ai model registry</td><td>default-embedding, default-chat</td><td>Resolves text-embedding-3-small and gpt-5.4 behind the database connection.</td></tr>
+          <tr><td>pgvector</td><td>vector(1536), cosine &lt;=&gt;</td><td>Represents cargo meaning and exposes cosine similarity as evidence.</td></tr>
+          <tr><td>DiskANN</td><td>spherical_quantized=true, sq_bits=4</td><td>Accelerates nearest-neighbor retrieval with 25,000 SQ training samples.</td></tr>
+          <tr><td>PostgreSQL indexes</td><td>status + ETA B-tree, bitmap combination</td><td>Lets the planner choose selective relational filters before spatial/vector work.</td></tr>
+          <tr><td>azure_ai.generate</td><td>gpt-5.4 tool plan + grounded answer</td><td>Powers the Agent Framework model turns without a second application credential.</td></tr>
+        </tbody>
+      </table>
+      <div class="footer"><span>Live health endpoint verifies versions and SQ reloptions</span><span>5 / 16</span></div>
+    </section>
+
+    <section class="slide divider dark" id="live">
+      <div class="divider-content">
+        <span class="divider-number">LIVE APPLICATION</span>
+        <h1>Ask, filter, locate, and inspect</h1>
+        <p class="lead">The next five views were captured from the running React + Vite application against live HorizonDB.</p>
+      </div>
+      <div class="footer"><span>Application walkthrough</span><span>6 / 16</span></div>
+    </section>
+
+    <section class="slide screen-slide" id="overview">
+      <div class="screen-header"><h1>One operations console, two distinct entry points</h1><p>Live HorizonDB / PostGIS / SQ4 DiskANN / Agent Framework</p></div>
+      <div class="screen-layout">
+        <img src="media/app-overview.png" alt="Fleet Intelligence overview" />
+        <div class="screen-notes">
+          <div class="screen-note green"><strong>Left</strong>Prompt plus explicit criteria. No conversation state.</div>
+          <div class="screen-note"><strong>Center</strong>Shared Leaflet map and shipment evidence.</div>
+          <div class="screen-note amber"><strong>Right</strong>Prompt-only gpt-5.4 agent with one typed tool.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide screen-slide" id="criteria-result">
+      <div class="screen-header"><h1>Criteria search isolates a live cold-chain exception</h1><p>Exception status + 3,000 km radius + semantic intent</p></div>
+      <div class="screen-layout">
+        <img src="media/app-criteria-result.png" alt="Criteria search result for cold-chain vaccines" />
+        <div class="screen-notes">
+          <div class="screen-note coral"><strong>SHIP-0007</strong>Exception shipment near the selected operating area.</div>
+          <div class="screen-note green"><strong>1,372 km</strong>PostGIS distance from the chosen center.</div>
+          <div class="screen-note"><strong>0.5578</strong>Hybrid score from cosine relevance and proximity.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide screen-slide" id="criteria-plan">
+      <div class="screen-header"><h1>The planner uses the selective criteria first</h1><p>EXPLAIN ANALYZE / BUFFERS / WAL</p></div>
+      <div class="screen-layout">
+        <img src="media/app-criteria-plan.png" alt="Criteria search execution plan" />
+        <div class="screen-notes">
+          <div class="screen-note"><strong>BitmapAnd</strong>Status B-tree and PostGIS geography GiST combine.</div>
+          <div class="screen-note green"><strong>ST_DWithin</strong>The index-assisted radius returns one live exception.</div>
+          <div class="screen-note amber"><strong>Planner choice</strong>For one highly selective row, relational and spatial filters win.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide screen-slide" id="agent-result">
+      <div class="screen-header"><h1>The agent receives only the operator's question</h1><p>Microsoft Agent Framework + gpt-5.4</p></div>
+      <div class="screen-layout">
+        <img src="media/app-agent-result.png" alt="Agent answer for delayed shipments" />
+        <div class="screen-notes">
+          <div class="screen-note amber"><strong>Prompt only</strong>No status, ETA, map center, or radius in the POST body.</div>
+          <div class="screen-note green"><strong>Tool-driven</strong>Three model-selected rows render as inspectable cards.</div>
+          <div class="screen-note"><strong>Query + plan</strong>Each answer retains its own SQL and plan snapshot.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide screen-slide" id="agent-plan">
+      <div class="screen-header"><h1>SQ DiskANN serves the agent's semantic tool call</h1><p>Custom Scan (DiskANNFilteredScan)</p></div>
+      <div class="screen-layout">
+        <img src="media/app-agent-plan.png" alt="Agent tool DiskANN execution plan" />
+        <div class="screen-notes">
+          <div class="screen-note amber"><strong>Model intent</strong>"shipments needing attention" + delayed status</div>
+          <div class="screen-note"><strong>DiskANNFilteredScan</strong>Filter then vector strategy with strict iterative search.</div>
+          <div class="screen-note green"><strong>3 TIDs</strong>Exactly the three delayed evidence rows are collected.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide code-insight" id="request-contracts">
+      <div class="brand"><span class="brand-mark">FI</span>Code walkthrough</div>
+      <p class="kicker">React to FastAPI</p>
+      <h1>Two UI paths become two enforceable API contracts</h1>
+      <div class="code-insight-grid">
+        <div class="insight-panel green">
+          <h3>Criteria search</h3>
+          <p>frontend/src/api.ts + backend/app/models.py</p>
+          <pre class="insight-code">searchShipments(query, status, spatial)
+  -&gt; POST <span class="code-value">/api/search</span>
+  {
+    query,
+    status,
+    eta_date,
+    eta_days,
+    location,
+    radius_km
+  }
+
+class <span class="code-call">SearchRequest</span>:
+  status: ShipmentStatus | None
+  eta_date: date | None
+  location: Coordinate | None
+
+validate: location pairs with radius
+validate: eta_date pairs with eta_days</pre>
+        </div>
+        <div class="insight-panel amber">
+          <h3>Agent conversation</h3>
+          <p>frontend/src/api.ts + backend/app/models.py</p>
+          <pre class="insight-code">chatWithAgent(query)
+  -&gt; POST <span class="code-value">/api/chat</span>
+  {
+    query
+  }
+
+class <span class="code-call">AgentRequest</span>:
+  model_config = ConfigDict(
+    <span class="code-value">extra="forbid"</span>
+  )
+  query: str
+  limit: int = 8
+
+status in request -&gt; <span class="code-key">HTTP 422</span></pre>
+        </div>
+      </div>
+      <div class="guard-callout"><strong>Design guard:</strong> the browser cannot accidentally apply left-side status, ETA, or map scope to the agent. FastAPI rejects those extra fields before orchestration starts.</div>
+      <div class="footer"><span>Explicit contracts prevent ambiguous behavior</span><span>12 / 16</span></div>
+    </section>
+
+    <section class="slide code-insight" id="agent-loop">
+      <div class="brand"><span class="brand-mark">FI</span>Code walkthrough</div>
+      <p class="kicker">Microsoft Agent Framework</p>
+      <h1>Framework-controlled tools, HorizonDB-controlled inference</h1>
+      <div class="loop-grid">
+        <div class="loop-step"><span class="loop-number">01</span><h3>Plan the tool call</h3><p>The custom chat client asks <code>azure_ai.generate</code> for JSON arguments matching the tool schema.</p></div>
+        <div class="loop-arrow">&#8594;</div>
+        <div class="loop-step"><span class="loop-number">02</span><h3>Invoke exactly once</h3><p>Agent Framework validates arguments and calls the local <code>search_shipments</code> function.</p></div>
+        <div class="loop-arrow">&#8594;</div>
+        <div class="loop-step"><span class="loop-number">03</span><h3>Answer from evidence</h3><p>The second model turn receives only the function result rows and writes the grounded answer.</p></div>
+      </div>
+      <div class="adapter-grid">
+        <pre><span class="code-key">@tool</span>(
+  name=<span class="code-value">"search_shipments"</span>,
+  max_invocations=1,
+)
+async def search_shipments(
+  query_text: str,
+  status_filter: StatusArgument = "all",
+):
+  rows = await repository.<span class="code-call">semantic_search</span>(...)
+  return shipment_tool_payload(rows)</pre>
+        <pre>class HorizonDBChatClient(
+  <span class="code-call">FunctionInvocationLayer</span>,
+  RawHorizonDBChatClient,
+):
+  configuration = {
+    <span class="code-value">"max_iterations": 2</span>,
+    <span class="code-value">"max_function_calls": 1</span>,
+  }
+
+service_url = <span class="code-value">"horizondb://azure_ai"</span></pre>
+      </div>
+      <div class="footer"><span>Agent Framework owns the loop; HorizonDB owns both model turns</span><span>13 / 16</span></div>
+    </section>
+
+    <section class="slide code-insight" id="query-path">
+      <div class="brand"><span class="brand-mark">FI</span>Code walkthrough</div>
+      <p class="kicker">Shared repository</p>
+      <h1>One parameterized query; PostgreSQL chooses the access path</h1>
+      <div class="query-layout">
+        <pre>WITH query_vector AS (
+  SELECT azure_openai.<span class="code-call">create_embeddings</span>(
+    %s, %s
+  )::vector(1536) AS embedding
+),
+candidates AS MATERIALIZED (
+  SELECT
+    s.*,
+    s.embedding <span class="code-key">&lt;=&gt;</span> query_vector.embedding
+      AS vector_distance,
+    ST_Distance(...) / 1000 AS distance_km
+  FROM horizon_ship.shipments AS s
+  CROSS JOIN query_vector
+  WHERE (%s IS NULL OR s.status = %s)
+    AND (%s IS NULL OR s.eta BETWEEN ...)
+    AND (%s IS NULL OR <span class="code-call">ST_DWithin</span>(...))
+  ORDER BY s.embedding <span class="code-key">&lt;=&gt;</span> query_vector.embedding
+  LIMIT 100
+)
+SELECT *,
+  <span class="code-value">0.72</span> * (1 - vector_distance)
+  + <span class="code-value">0.28</span> * spatial_score AS hybrid_score
+FROM candidates
+ORDER BY hybrid_score DESC;</pre>
+        <div class="plan-stack">
+          <div class="plan-choice"><h3>Explicit criteria</h3><code>BitmapAnd</code><code>shipments_status_idx</code><code>+ geography GiST</code><p>Highly selective relational and PostGIS predicates win for one row.</p></div>
+          <div class="plan-choice diskann"><h3>Agent semantic search</h3><code>DiskANNFilteredScan</code><code>Filter(SeqScan) -&gt; Vector</code><code>TIDs Collected: 3</code><p>Strict iterative search preserves filtered nearest-neighbor ordering.</p></div>
+          <div class="plan-note">Every SELECT first runs through <strong>EXPLAIN ANALYZE</strong>. The literal SQL and plan snapshot are attached to the response that produced the visible cards.</div>
+        </div>
+      </div>
+      <div class="footer"><span>No forced index: the planner remains visible and in control</span><span>14 / 16</span></div>
+    </section>
+
+    <section class="slide code-insight" id="setup-deploy">
+      <div class="brand"><span class="brand-mark">FI</span>Code walkthrough</div>
+      <p class="kicker">From schema to Azure</p>
+      <h1>Idempotent setup turns the sample into a repeatable deployment</h1>
+      <div class="setup-flow">
+        <div class="setup-step"><b>01</b><strong>Schema</strong><span>Business columns, three PostGIS points, metadata JSON, and vector(1536) live in each shipment row.</span></div>
+        <div class="setup-step"><b>02</b><strong>Seed and embed</strong><span>Upsert 24 shipments, invalidate changed embeddings, and batch inference inside HorizonDB.</span></div>
+        <div class="setup-step"><b>03</b><strong>Build SQ4</strong><span>Rebuild DiskANN only after every row is embedded; startup verifies the index reloptions.</span></div>
+        <div class="setup-step"><b>04</b><strong>Deploy</strong><span><code>azd up</code> provisions native HorizonDB, ACR, and separate API and React Container Apps.</span></div>
+      </div>
+      <div class="setup-code-grid">
+        <pre>CREATE INDEX ... USING diskann
+  (embedding vector_cosine_ops)
+WITH (
+  <span class="code-value">spherical_quantized = true</span>,
+  <span class="code-value">sq_bits = 4</span>,
+  sq_training_samples = 25000
+);
+
+SET LOCAL diskann.iterative_search
+  TO <span class="code-value">'strict_order'</span>;</pre>
+        <pre><span class="code-key">azd up</span>
+  -&gt; Microsoft.HorizonDb/clusters
+  -&gt; parameter group approves extensions
+  -&gt; Container Apps: API + React UI
+
+postdeploy health requires:
+  gpt-5.4 + Agent Framework
+  spherical quantization = true
+  sq_bits = 4
+  training samples = 25000</pre>
+      </div>
+      <div class="footer"><span>Setup can be rerun without duplicating shipments</span><span>15 / 16</span></div>
+    </section>
+
+    <section class="slide" id="recap">
+      <div class="brand"><span class="brand-mark">FI</span>Customer recap</div>
+      <p class="kicker">Reusable operational pattern</p>
+      <h1>One database, two trustworthy ways to ask</h1>
+      <div class="recap-grid">
+        <div class="recap-list">
+          <div class="recap-item"><strong>Deterministic when operators know the criteria</strong>The left path makes status, time, and geographic scope explicit.</div>
+          <div class="recap-item"><strong>Agentic when intent is conversational</strong>The right path gives gpt-5.4 one controlled tool over the same repository.</div>
+          <div class="recap-item"><strong>Inspectable from answer to plan</strong>Rows, scores, SQL literals, and planner choices remain visible.</div>
+        </div>
+        <div class="value-block"><strong>Customer value</strong><p>HorizonDB combines relational truth, PostGIS, vector retrieval, spherical quantization, and managed model inference without duplicating operational data across specialized stores.</p></div>
+      </div>
+      <div class="footer"><span>Shipment tracking today; fleet and security dispatch next</span><span>16 / 16</span></div>
+    </section>
+  </main>
+
+  <div class="nav-hint">Arrow keys to navigate</div>
+  <script>
+    const slides = Array.from(document.querySelectorAll('.slide'));
+    const params = new URLSearchParams(location.search);
+    const rendering = params.has('render');
+    let current = Math.max(0, slides.findIndex((slide) => slide.id === location.hash.slice(1)));
+
+    if (rendering) document.body.classList.add('rendering');
+
+    function show(index, updateHash = true) {
+      current = Math.max(0, Math.min(slides.length - 1, index));
+      slides.forEach((slide, slideIndex) => slide.classList.toggle('active', slideIndex === current));
+      if (updateHash) history.replaceState(null, '', `#${slides[current].id}`);
+      fit();
+    }
+
+    function fit() {
+      const deck = document.getElementById('deck');
+      if (rendering) {
+        deck.style.transform = 'none';
+        return;
+      }
+      const scale = Math.min(innerWidth / 1920, innerHeight / 1080);
+      deck.style.transform = `scale(${scale})`;
+    }
+
+    addEventListener('keydown', (event) => {
+      if (['ArrowRight', 'PageDown', ' '].includes(event.key)) show(current + 1);
+      if (['ArrowLeft', 'PageUp'].includes(event.key)) show(current - 1);
+      if (event.key === 'Home') show(0);
+      if (event.key === 'End') show(slides.length - 1);
+    });
+    addEventListener('resize', fit);
+    show(current, false);
+  </script>
+</body>
+</html>

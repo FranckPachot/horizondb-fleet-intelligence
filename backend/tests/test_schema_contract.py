@@ -28,6 +28,9 @@ def test_setup_uses_spherical_quantization_contract() -> None:
 def test_repository_combines_postgis_diskann_and_hybrid_ranking() -> None:
     repository = REPOSITORY_PATH.read_text(encoding="utf-8")
 
+    assert "spherical_quantized=true" in repository
+    assert "sq_bits=4" in repository
+    assert "sq_training_samples=25000" in repository
     assert "ST_DWithin" in repository
     assert "ORDER BY s.embedding <=> query_vector.embedding" in repository
     assert "0.72 * (1 - vector_distance)" in repository

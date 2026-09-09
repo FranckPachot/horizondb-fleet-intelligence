@@ -1,7 +1,8 @@
 # HorizonDB Fleet Intelligence
 
 HorizonDB Fleet Intelligence is a customer-ready spatial and semantic operations
-sample built with FastAPI, Psycopg 3, React, and Vite. One workflow demonstrates:
+sample built with FastAPI, Psycopg 3, React, and Vite. Two intentionally separate
+workflows demonstrate:
 
 - PostGIS stores origin, destination, and current shipment positions as SRID
   4326 points and serves them to a Leaflet world map.
@@ -11,8 +12,10 @@ sample built with FastAPI, Psycopg 3, React, and Vite. One workflow demonstrates
 - pgvector cosine distance (`<=>`) and spatial distance produce a hybrid rank.
 - DiskANN accelerates cosine search with 4-bit spherical quantization and
   advanced filtered-search settings.
-- HorizonDB's built-in `default-chat` model writes grounded shipment answers
-  from the same Psycopg-backed semantic search used by the API.
+- Microsoft Agent Framework runs a `gpt-5.4` shipment assistant. Its one typed
+  tool invokes the same Psycopg-backed semantic search used by the criteria API.
+- HorizonDB's `default-chat` alias resolves to `gpt-5.4`; the Agent Framework
+  adapter plans tool calls and writes grounded answers through `azure_ai.generate`.
 
 The repository includes 24 realistic global shipments. Only a HorizonDB
 connection is required because semantic search and assistant answers both use
@@ -20,48 +23,113 @@ models managed by the database service.
 
 ## User Interface
 
-The React console combines a shipment list, interactive Leaflet map, map-selected
-search radius, and a grounded agent panel. Search results expose semantic score,
-distance, and hybrid score as inspectable evidence.
+The left workbench sends a prompt plus explicit status, ETA, and map-radius
+criteria to `/api/search`. It is a deterministic search form, not a chat. The
+right panel sends only a natural-language prompt to `/api/chat`; Agent Framework
+chooses the tool arguments. Both paths project their exact result rows onto the
+shared list and Leaflet map, with scores and execution plans available as evidence.
+
+![Fleet Intelligence interface with criteria search, map, and Agent Framework assistant](docs/media/app.png)
 
 ## Technical Demo
 
-The [customer demo package](demo/README.md) contains the final narrated video and
-the presentation deck. Internal research, source captures, narration, and video
-production files are deliberately excluded from Git.
+The [customer demo package](demo/README.md) contains the final narrated video,
+the [PowerPoint recording deck](demo/fleet-intelligence-demo.pptx) with presenter
+notes and embedded live-demo clips, the
+[16-slide HTML presentation](demo/fleet-intelligence-slides.html), and the live
+application and plan captures. Internal production automation remains excluded
+from Git.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Browser[React + Leaflet] -->|REST| API[FastAPI]
-    API --> Agent[Grounded shipment assistant]
-    Agent --> Tool[spatial-semantic search tool]
-    API --> Repo[Psycopg repository]
+  Criteria[Left criteria workbench] -->|POST /api/search| API[FastAPI]
+  Chat[Right natural-language prompt] -->|POST /api/chat| Agent[Microsoft Agent Framework + gpt-5.4]
+  API --> Repo[Psycopg repository]
+  Agent --> Tool[search_shipments tool]
     Tool --> Repo
     Repo --> DB[(Azure HorizonDB)]
-    DB --> Chat[azure_ai.generate + default-chat]
+  DB --> Models[azure_ai + model registry]
     DB --> PostGIS[PostGIS points]
-    DB --> AzureAI[azure_ai embeddings]
     DB --> Vector[pgvector + SQ DiskANN]
 ```
 
-The agent calls one typed search tool. That tool embeds the question inside
-HorizonDB, uses PostGIS to apply the optional radius, retrieves candidates with
-spherical-quantized DiskANN, and reranks them with a 72% semantic and 28% spatial
-score. Only matched rows are passed to `azure_ai.generate` as grounding context.
+The criteria path applies operator-selected status, ETA, center, and radius values.
+The prompt-only agent path has no UI criteria. Agent Framework must call
+`search_shipments` exactly once; the tool embeds its query in HorizonDB and
+retrieves rows through the same repository method. When a radius is present on
+the criteria path, the final rank is 72% semantic and 28% spatial. Only tool rows
+are passed to `gpt-5.4` as grounding context, so the answer and visible cards use
+the same evidence.
 
 ## Repository Layout
 
 | Path | Purpose |
 | --- | --- |
 | `backend/app/main.py` | FastAPI application and REST routes |
-| `backend/app/agent.py` | Grounded HorizonDB chat and shipment search orchestration |
-| `backend/app/tools.py` | Typed spatial-semantic tool invoked by the agent |
+| `backend/app/agent.py` | Agent Framework definition and typed `search_shipments` tool |
+| `backend/app/horizon_agent_client.py` | HorizonDB-backed Agent Framework chat client and tool loop |
 | `backend/app/repository.py` | Async Psycopg, PostGIS projection, and vector search |
 | `backend/app/setup_database.py` | Idempotent schema, seed, model verification, embedding, and index setup |
 | `database/schema.sql` | HorizonDB extensions and relational/vector schema |
 | `frontend/src` | React operations console, Leaflet map, and agent chat |
+| `azure.yaml` and `infra` | Azure Developer CLI, native HorizonDB Bicep, and Container Apps deployment |
+
+## Deploy to Azure
+
+The repository includes an `azd` deployment for a native
+`Microsoft.HorizonDb/clusters@2026-01-20-preview` cluster, Azure Container
+Registry, a Container Apps environment, and separate backend and frontend
+Container Apps.
+
+### Prerequisites
+
+- Azure Developer CLI 1.15 or newer and Azure CLI.
+- A subscription enabled for the HorizonDB preview.
+- The `Microsoft.OrionDB` provider registered in that subscription. The provider
+  namespace remains `Microsoft.OrionDB` while the Bicep resource type is
+  `Microsoft.HorizonDb`.
+- Contributor and User Access Administrator, or equivalent permissions to create
+  managed identities and role assignments.
+- One of the currently supported preview regions: `australiaeast`, `centralus`,
+  `uaenorth`, `uksouth`, or `westus3`.
+- HorizonDB access to the built-in `default-chat` (`gpt-5.4`) and
+  `default-embedding` (`text-embedding-3-small`) aliases.
+
+Register the preview provider once if necessary:
+
+```powershell
+az provider register --namespace Microsoft.OrionDB
+```
+
+Deploy the complete sample from the repository root:
+
+```powershell
+az login
+azd auth login
+azd up
+```
+
+The preprovision hook validates the provider and region and adds the deployer's
+public IPv4 address to the HorizonDB firewall. Bicep pre-approves `azure_ai`,
+`vector`, `pg_diskann`, and `postgis`, creates the database, and verifies both
+built-in model aliases. The backend container then runs the idempotent schema,
+seed, embedding, and SQ4 DiskANN setup before starting FastAPI. The frontend
+serves the Vite build through Nginx and proxies same-origin `/api` requests to the
+backend Container App.
+
+The postdeploy hook fails unless live health reports Agent Framework with
+`gpt-5.4` and spherical-quantized DiskANN with 4-bit codes and 25,000 training
+samples. Remove all deployed resources with:
+
+```powershell
+azd down --purge
+```
+
+HorizonDB is a preview service. Region and subscription availability can change;
+the hooks fail with a direct prerequisite message rather than substituting a
+non-HorizonDB database.
 
 ## Run Locally
 
@@ -312,17 +380,19 @@ npm run dev
 
 ## Runtime Requirements
 
-The application has one runtime configuration: HorizonDB provides PostGIS, DiskANN
-search over built-in embeddings, and grounded answers through
-`azure_ai.generate`. FastAPI fails at startup when the database connection is
-missing, either model alias is unavailable, any shipment lacks an embedding,
-or the primary DiskANN index is unavailable.
+The application has one runtime connection. HorizonDB provides PostGIS, SQ
+DiskANN search over built-in embeddings, and `gpt-5.4` inference through the
+registered `default-chat` alias. FastAPI fails at startup when the connection is
+missing, either model alias is unavailable, any shipment lacks an embedding, or
+the primary index is missing any required spherical-quantization option.
 
 ## Spatial-Semantic Search
 
-The search tool creates the query vector inside HorizonDB, applies an optional
-PostGIS radius, and keeps vector distance in the candidate `ORDER BY ... LIMIT`
-so DiskANN serves candidate retrieval:
+The shared repository creates the query vector inside HorizonDB. Criteria search
+can apply status, ETA, and PostGIS radius filters; the agent tool supplies only
+natural-language intent and an optional status inferred from that prompt. Both
+keep vector distance in the candidate `ORDER BY ... LIMIT` so DiskANN serves
+candidate retrieval:
 
 ```sql
 WITH query_vector AS (
@@ -359,6 +429,14 @@ CREATE INDEX shipments_embedding_diskann_idx
 Filtered requests enable DiskANN strict iterative search and the filter hook in
 a transaction-local scope before executing the query.
 
+## Agent Framework
+
+`/api/chat` accepts only `query` and `limit`; extra criteria fields are rejected.
+The first `gpt-5.4` turn returns JSON arguments for the decorated
+`search_shipments` tool. Agent Framework validates and invokes that tool. The
+second turn receives only the serialized shipment rows and produces the grounded
+answer. The chat response returns those same rows for the list and map.
+
 ## API
 
 | Method | Route | Purpose |
@@ -368,8 +446,8 @@ a transaction-local scope before executing the query.
 | `GET` | `/api/shipments/stats` | Fleet counts by status |
 | `GET` | `/api/shipments/{number}` | Shipment details and PostGIS coordinates |
 | `GET` | `/api/explain/last` | Last literalized SQL statement and text execution plan |
-| `POST` | `/api/search` | Direct spatial-semantic search with optional location/radius |
-| `POST` | `/api/chat` | Agent answer plus grounded, scored shipment rows |
+| `POST` | `/api/search` | Prompt plus explicit status, ETA, location, and radius criteria |
+| `POST` | `/api/chat` | Prompt-only Agent Framework answer plus its grounded rows |
 
 ## Execution Plans
 
@@ -383,15 +461,16 @@ The backend separately retains the list-all plan and the spatial-semantic plan
 that produced the current search results, together with SQL rendered using
 PostgreSQL literals. The compact execution-plan icon beside the count is always
 available and selects the plan matching the displayed rows. It is the only
-control that opens the plan window.
+list-side control that opens the plan window. Each Agent Framework response also
+contains its own plan snapshot; the `Query + plan` button above that turn's cards
+opens the exact SQL and plan even after a later criteria search runs.
 
 The plan pane has Text and Graph tabs. The graph preserves parent-child plan
 structure so bitmap combinations, index scans, and their conditions can be read
 as one flow. It also exposes HorizonDB `DiskANNFilteredScan`, strategy, and
-collected TID diagnostics. The assistant status selector uses the same status
-colors as shipment markers, and its rerun control executes the last prompt with
-the current status, ETA window, and spatial scope. The query and plan panes can
-be resized with the divider or its arrow-key controls.
+collected TID diagnostics. Criteria controls use the same status colors as the
+shipment markers. The query and plan panes can be resized with the divider or
+its arrow-key controls.
 
 Result badges show cosine similarity as `cos 0.63`, not as a percentage or
 probability. Shipment embeddings are generated from title, description, origin,

@@ -12,6 +12,7 @@ import {
   Radio,
 } from 'lucide-react'
 import {
+  chatWithAgent,
   getCapabilities,
   getLastExplain,
   getShipments,
@@ -25,6 +26,7 @@ import { ShipmentList } from './components/ShipmentList'
 import { ShipmentMap } from './components/ShipmentMap'
 import type {
   DatabaseCapabilities,
+  ChatResponse,
   Coordinate,
   ExplainPlan,
   SearchResponse,
@@ -36,10 +38,12 @@ import './App.css'
 
 type StatusFilter = ShipmentStatus | 'all'
 type MobileView = 'shipments' | 'map' | 'assistant'
+type ResultSource = 'criteria' | 'agent' | null
 
 function App() {
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [semanticResults, setSemanticResults] = useState<Shipment[] | null>(null)
+  const [resultSource, setResultSource] = useState<ResultSource>(null)
   const [stats, setStats] = useState<ShipmentStats | null>(null)
   const [capabilities, setCapabilities] =
     useState<DatabaseCapabilities | null>(null)
@@ -127,14 +131,17 @@ function App() {
   function showAllShipments() {
     startTransition(() => {
       setSemanticResults(null)
+      setResultSource(null)
       setStatus('all')
       setEtaDate(null)
+      setSearchCenter(null)
+      setSearchRadiusKm(500)
       setSelected(null)
       setExplainOpen(false)
     })
   }
 
-  async function runSemanticSearch(query: string): Promise<SearchResponse> {
+  async function runCriteriaSearch(query: string): Promise<SearchResponse> {
     setExplainOpen(false)
     const result = await searchShipments(
       query,
@@ -148,6 +155,18 @@ function App() {
     )
     startTransition(() => {
       setSemanticResults(result.shipments)
+      setResultSource('criteria')
+      setSelected(result.shipments[0] ?? null)
+    })
+    return result
+  }
+
+  async function runAgentSearch(query: string): Promise<ChatResponse> {
+    setExplainOpen(false)
+    const result = await chatWithAgent(query)
+    startTransition(() => {
+      setSemanticResults(result.shipments)
+      setResultSource('agent')
       setSelected(result.shipments[0] ?? null)
     })
     return result
@@ -169,6 +188,13 @@ function App() {
     } finally {
       setExplainLoading(false)
     }
+  }
+
+  function showExplain(explainPlan: ExplainPlan) {
+    setExplain(explainPlan)
+    setExplainError(null)
+    setExplainLoading(false)
+    setExplainOpen(true)
   }
 
   return (
@@ -193,13 +219,22 @@ function App() {
             <MapIcon size={14} />
             PostGIS
           </span>
-          <span className={capabilities?.diskann_version ? 'available' : 'standby'}>
+          <span
+            className={capabilities?.diskann_spherical_quantization ? 'available' : 'standby'}
+            title={
+              capabilities?.diskann_spherical_quantization
+                ? `Spherical quantization: ${capabilities.diskann_sq_bits}-bit, ${capabilities.diskann_sq_training_samples?.toLocaleString()} training samples`
+                : 'DiskANN spherical quantization'
+            }
+          >
             <PackageSearch size={14} />
-            DiskANN
+            {capabilities?.diskann_sq_bits
+              ? `SQ${capabilities.diskann_sq_bits} DiskANN`
+              : 'SQ DiskANN'}
           </span>
-          <span className={capabilities?.ai_in_database ? 'available' : 'standby'}>
+          <span className={capabilities?.agent_framework ? 'available' : 'standby'}>
             <Bot size={14} />
-            HorizonDB AI
+            Agent Framework
           </span>
         </div>
 
@@ -227,7 +262,20 @@ function App() {
           total={visibleShipments.length}
           selectedNumber={mapSelection?.shipment_number ?? null}
           showingResults={semanticResults !== null}
+          resultSource={resultSource}
           loading={loading}
+          status={status}
+          onStatusChange={setStatus}
+          etaDate={etaDate}
+          etaDays={etaDays}
+          onEtaDateChange={setEtaDate}
+          onEtaDaysChange={setEtaDays}
+          searchCenter={searchCenter}
+          searchRadiusKm={searchRadiusKm}
+          onSearchRadiusChange={setSearchRadiusKm}
+          onClearSearchCenter={() => setSearchCenter(null)}
+          onSearch={runCriteriaSearch}
+          onReset={showAllShipments}
           onSelect={(shipment) => selectShipment(shipment, true)}
           onShowExplain={() => void showLastExplain()}
         />
@@ -269,18 +317,10 @@ function App() {
         </section>
 
         <ChatPanel
-          onSearch={runSemanticSearch}
-          onShowAll={showAllShipments}
-          searchCenter={searchCenter}
-          searchRadiusKm={searchRadiusKm}
-          onSearchRadiusChange={setSearchRadiusKm}
-          onClearSearchCenter={() => setSearchCenter(null)}
-          status={status}
-          onStatusChange={setStatus}
-          etaDate={etaDate}
-          etaDays={etaDays}
-          onEtaDateChange={setEtaDate}
-          onEtaDaysChange={setEtaDays}
+          onSearch={runAgentSearch}
+          onSelect={(shipment) => selectShipment(shipment, true)}
+          onShowExplain={showExplain}
+          selectedNumber={mapSelection?.shipment_number ?? null}
         />
       </main>
 

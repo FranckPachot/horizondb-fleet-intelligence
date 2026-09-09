@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ShipmentStatus(StrEnum):
@@ -57,6 +57,19 @@ class SearchRequest(BaseModel):
         return self
 
 
+class AgentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=2, max_length=300)
+    limit: int = Field(default=8, ge=1, le=24)
+
+
+class ExplainPlan(BaseModel):
+    query: str
+    plan: str
+    captured_at: datetime
+
+
 class SearchResponse(BaseModel):
     query: str
     search_mode: Literal["spatial_semantic_diskann"]
@@ -65,8 +78,10 @@ class SearchResponse(BaseModel):
 
 class ChatResponse(SearchResponse):
     answer: str
+    agent_framework: Literal[True] = True
     ai_in_database: Literal[True] = True
     chat_model: str
+    explain: ExplainPlan | None = None
 
 
 class StatusCount(BaseModel):
@@ -85,17 +100,15 @@ class DatabaseCapabilities(BaseModel):
     postgis_version: str | None = None
     vector_version: str | None = None
     diskann_version: str | None = None
+    diskann_spherical_quantization: bool = False
+    diskann_sq_bits: int | None = None
+    diskann_sq_training_samples: int | None = None
     azure_ai_version: str | None = None
     shipment_count: int = 0
     azure_embedding_count: int = 0
     embedding_mode: Literal["azure_openai"] = "azure_openai"
     embedding_model_alias: str
+    agent_framework: Literal[True] = True
     ai_in_database: Literal[True] = True
     chat_model: str | None = None
     detail: str | None = None
-
-
-class ExplainPlan(BaseModel):
-    query: str
-    plan: str
-    captured_at: datetime

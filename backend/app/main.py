@@ -6,9 +6,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.agent import ShipmentAgent
+from app.agent import AgentClient, ShipmentAgent
 from app.config import Settings, get_settings
 from app.models import (
+    AgentRequest,
     ChatResponse,
     DatabaseCapabilities,
     ExplainPlan,
@@ -35,6 +36,7 @@ RepositoryDependency = Annotated[ShipmentRepository, Depends(_get_repository)]
 def create_app(
     settings: Settings | None = None,
     repository: ShipmentRepository | None = None,
+    agent_client: AgentClient | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
 
@@ -55,8 +57,8 @@ def create_app(
 
         app.state.repository = active_repository
         app.state.shipment_agent = ShipmentAgent(
-            resolved_settings,
             active_repository,
+            client=agent_client,
         )
         yield
 
@@ -96,8 +98,9 @@ def create_app(
         capabilities = await shipment_repository.capabilities()
         return capabilities.model_copy(
             update={
+                "agent_framework": True,
                 "ai_in_database": True,
-                "chat_model": resolved_settings.chat_model_alias,
+                "chat_model": shipment_repository.chat_model_name,
             }
         )
 
@@ -163,7 +166,7 @@ def create_app(
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def agent_chat(
-        request: SearchRequest,
+        request: AgentRequest,
         http_request: Request,
     ) -> ChatResponse:
         shipment_agent: ShipmentAgent = http_request.app.state.shipment_agent

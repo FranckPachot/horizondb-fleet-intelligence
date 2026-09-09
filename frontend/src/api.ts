@@ -1,4 +1,5 @@
 import type {
+  ChatResponse,
   DatabaseCapabilities,
   ExplainPlan,
   SearchResponse,
@@ -52,7 +53,7 @@ export function searchShipments(
   status: ShipmentStatus | null,
   spatial: SpatialSearch,
 ): Promise<SearchResponse> {
-  return apiRequest('/api/chat', {
+  return apiRequest('/api/search', {
     method: 'POST',
     body: JSON.stringify({
       query,
@@ -63,5 +64,12 @@ export function searchShipments(
       radius_km: spatial.location ? spatial.radiusKm : null,
       limit: 8,
     }),
+  })
+}
+
+export function chatWithAgent(query: string): Promise<ChatResponse> {
+  return apiRequest('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({ query }),
   })
 }

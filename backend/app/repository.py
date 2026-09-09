@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
@@ -46,6 +47,7 @@ _SHIPMENT_COLUMNS = """
 class ShipmentRepository(Protocol):
     mode: str
     search_mode: str
+    chat_model_name: str
 
     async def list_shipments(
         self,
@@ -63,6 +65,13 @@ class ShipmentRepository(Protocol):
         radius_km: float | None,
         limit: int,
     ) -> list[Shipment]: ...
+
+    async def plan_tool_call(
+        self,
+        question: str,
+        tool_name: str,
+        tool_schema: str,
+    ) -> dict[str, Any]: ...
 
     async def generate_answer(self, question: str, context: str) -> str: ...
 
@@ -131,6 +140,7 @@ class PostgresShipmentRepository:
         self._connect_timeout = settings.database_connect_timeout_seconds
         self._model_alias = settings.embedding_model_alias
         self._chat_model_alias = settings.chat_model_alias
+        self.chat_model_name = settings.chat_model_alias
         self._search_ready = False
         self._last_explain: ExplainPlan | None = None
         self._last_search_explain: ExplainPlan | None = None
@@ -179,6 +189,11 @@ SELECT
         FROM model_registry.model_list_all()
         WHERE alias IN (%s, %s)
     ) AS models_registered,
+    (
+        SELECT model_name
+        FROM model_registry.model_list_all()
+        WHERE alias = %s
+    ) AS chat_model_name,
     EXISTS (
 		SELECT 1
         FROM pg_catalog.pg_proc AS procedure
@@ -187,16 +202,31 @@ SELECT
         WHERE namespace.nspname = 'azure_ai'
             AND procedure.proname = 'generate'
     ) AS generate_available,
-    to_regclass('horizon_ship.shipments_embedding_diskann_idx') IS NOT NULL
-        AS index_ready;
+    EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_class AS index_relation
+        WHERE index_relation.oid =
+            to_regclass('horizon_ship.shipments_embedding_diskann_idx')
+            AND COALESCE(index_relation.reloptions, ARRAY[]::text[]) @> ARRAY[
+                'spherical_quantized=true',
+                'sq_bits=4',
+                'sq_training_samples=25000'
+            ]
+    ) AS index_ready;
 """
         async with self._pool.connection() as connection:
             rows = await self._execute_select(
                 connection,
                 query,
-                (self._model_alias, self._chat_model_alias),
+                (
+                    self._model_alias,
+                    self._chat_model_alias,
+                    self._chat_model_alias,
+                ),
             )
             row = rows[0]
+        if row["chat_model_name"]:
+            self.chat_model_name = str(row["chat_model_name"])
         return bool(
             row["shipment_count"]
             and row["shipment_count"] == row["embedding_count"]
@@ -251,15 +281,8 @@ ORDER BY s.shipment_number;
                 self._last_list_explain = self._last_explain
         return [_row_to_shipment(row) for row in rows]
 
-    async def generate_answer(self, question: str, context: str) -> str:
+    async def _generate_text(self, prompt: str, system_prompt: str) -> str:
         self._require_search_readiness()
-        prompt = f"User question:\n{question}\n\nShipment search results:\n{context}"
-        system_prompt = (
-            "You are a concise shipping operations assistant. Base every shipment "
-            "number, route, status, ETA, and similarity claim only on the supplied "
-            "search results. Mention the best matches and briefly explain why they fit. "
-            "Never invent a shipment."
-        )
         statement = "SELECT azure_ai.generate(%s, %s, %s) AS answer;"
         async with self._pool.connection() as connection:
             rows = await self._execute_select(
@@ -269,6 +292,56 @@ ORDER BY s.shipment_number;
             )
             row = rows[0]
         return str(row["answer"])
+
+    async def plan_tool_call(
+        self,
+        question: str,
+        tool_name: str,
+        tool_schema: str,
+    ) -> dict[str, Any]:
+        prompt = (
+            f"User request:\n{question}\n\n"
+            f"Available tool:\n{tool_schema}\n\n"
+            "Return only the JSON arguments object for this tool call. Keep query_text "
+            "focused on the shipment intent. Use status_filter='all' unless the user "
+            "explicitly requests one of the supported statuses."
+        )
+        raw_plan = await self._generate_text(
+            prompt,
+            (
+                "You route fleet questions to one required Agent Framework tool. "
+                f"Always call {tool_name} exactly once and output only valid JSON "
+                "matching its parameter schema."
+            ),
+        )
+        json_match = re.search(r"\{.*\}", raw_plan, flags=re.DOTALL)
+        if json_match is None:
+            raise SemanticSearchUnavailableError(
+                "HorizonDB chat model did not return Agent Framework tool arguments"
+            )
+        try:
+            arguments = json.loads(json_match.group(0))
+        except json.JSONDecodeError as exception:
+            raise SemanticSearchUnavailableError(
+                "HorizonDB chat model returned invalid Agent Framework tool arguments"
+            ) from exception
+        if not isinstance(arguments, dict):
+            raise SemanticSearchUnavailableError(
+                "HorizonDB chat model returned a non-object Agent Framework tool call"
+            )
+        return arguments
+
+    async def generate_answer(self, question: str, context: str) -> str:
+        prompt = f"User question:\n{question}\n\nShipment search results:\n{context}"
+        return await self._generate_text(
+            prompt,
+            (
+                "You are a concise shipping operations assistant. Base every shipment "
+                "number, route, status, ETA, and similarity claim only on the supplied "
+                "search results. Mention the best matches and briefly explain why they fit. "
+                "Never invent a shipment."
+            ),
+        )
 
     async def semantic_search(
         self,
@@ -415,6 +488,28 @@ SELECT
 	(
 		SELECT extversion FROM pg_catalog.pg_extension WHERE extname = 'pg_diskann'
 	) AS diskann_version,
+    COALESCE((
+        SELECT index_relation.reloptions @> ARRAY['spherical_quantized=true']
+        FROM pg_catalog.pg_class AS index_relation
+        WHERE index_relation.oid =
+            to_regclass('horizon_ship.shipments_embedding_diskann_idx')
+    ), false) AS diskann_spherical_quantization,
+    (
+        SELECT split_part(index_option, '=', 2)::integer
+        FROM pg_catalog.pg_class AS index_relation
+        CROSS JOIN LATERAL unnest(index_relation.reloptions) AS options(index_option)
+        WHERE index_relation.oid =
+            to_regclass('horizon_ship.shipments_embedding_diskann_idx')
+            AND starts_with(index_option, 'sq_bits=')
+    ) AS diskann_sq_bits,
+    (
+        SELECT split_part(index_option, '=', 2)::integer
+        FROM pg_catalog.pg_class AS index_relation
+        CROSS JOIN LATERAL unnest(index_relation.reloptions) AS options(index_option)
+        WHERE index_relation.oid =
+            to_regclass('horizon_ship.shipments_embedding_diskann_idx')
+            AND starts_with(index_option, 'sq_training_samples=')
+    ) AS diskann_sq_training_samples,
     (
         SELECT extversion FROM pg_catalog.pg_extension WHERE extname = 'azure_ai'
     ) AS azure_ai_version,
@@ -432,6 +527,11 @@ FROM horizon_ship.shipments;
             postgis_version=row["postgis_version"],
             vector_version=row["vector_version"],
             diskann_version=row["diskann_version"],
+            diskann_spherical_quantization=bool(
+                row["diskann_spherical_quantization"]
+            ),
+            diskann_sq_bits=row["diskann_sq_bits"],
+            diskann_sq_training_samples=row["diskann_sq_training_samples"],
             azure_ai_version=row["azure_ai_version"],
             shipment_count=int(row["shipment_count"]),
             azure_embedding_count=int(row["azure_embedding_count"]),

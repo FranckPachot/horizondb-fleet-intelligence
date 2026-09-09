@@ -1,6 +1,7 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
+
 from app.config import Settings
 from app.models import (
     Coordinate,
@@ -17,10 +18,12 @@ from app.sample_data import build_sample_shipments
 class FakeShipmentRepository:
     mode = "horizondb"
     search_mode = "spatial_semantic_diskann"
+    chat_model_name = "gpt-5.4"
 
     def __init__(self) -> None:
         self._shipments = build_sample_shipments()
         self.last_search: dict | None = None
+        self.last_tool_plan: dict | None = None
         self.last_explain_search: bool | None = None
 
     async def list_shipments(
@@ -80,8 +83,25 @@ class FakeShipmentRepository:
         ]
 
     async def generate_answer(self, question: str, context: str) -> str:
-        del question, context
+        assert question
+        assert "SHIP-0014" in context
         return "SHIP-0014 is the strongest medical match."
+
+    async def plan_tool_call(
+        self,
+        question: str,
+        tool_name: str,
+        tool_schema: str,
+    ) -> dict[str, str]:
+        self.last_tool_plan = {
+            "question": question,
+            "tool_name": tool_name,
+            "tool_schema": tool_schema,
+        }
+        return {
+            "query_text": question.splitlines()[0],
+            "status_filter": "all",
+        }
 
     async def get_shipment(self, shipment_number: str) -> Shipment | None:
         return next(
@@ -113,6 +133,9 @@ class FakeShipmentRepository:
             postgis_version="3.5.2",
             vector_version="0.8.0",
             diskann_version="0.7.3",
+            diskann_spherical_quantization=True,
+            diskann_sq_bits=4,
+            diskann_sq_training_samples=25000,
             azure_ai_version="2.2.2",
             shipment_count=len(self._shipments),
             azure_embedding_count=len(self._shipments),
@@ -122,7 +145,13 @@ class FakeShipmentRepository:
 
     def last_explain(self, search: bool = True) -> ExplainPlan | None:
         self.last_explain_search = search
-        return None
+        if self.last_search is None:
+            return None
+        return ExplainPlan(
+            query="SELECT * FROM horizon_ship.shipments ORDER BY embedding <=> $1;",
+            plan="Custom Scan (DiskANNFilteredScan)",
+            captured_at=datetime.now(UTC),
+        )
 
 
 @pytest.fixture
