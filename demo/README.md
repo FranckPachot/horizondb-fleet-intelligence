@@ -1,11 +1,12 @@
 # HorizonDB Fleet Intelligence Demo
 
-This customer package contains the final presentation and narrated demo:
+This customer package contains the final presentation and demo recordings:
 
 - `fleet-intelligence-demo.pptx`: the 16-slide PowerPoint deck with presenter
 	notes and five embedded, silent demo clips.
 - `fleet-intelligence-slides.html`: a keyboard-navigable 16-slide customer deck.
-- `fleet-intelligence-demo.mp4`: the 7 minute 45 second generated-voice walkthrough.
+- `fleet-intelligence-demo-live.mp4`: the live end-to-end application walkthrough.
+- `fleet-intelligence-demo-generated.mp4`: the 7 minute 45 second generated-voice walkthrough.
 - `presenter-notes.md`: the same speaking script in a reviewable text format.
 - `media/`: live 1920 x 1080 application and execution-plan captures used by the deck.
 

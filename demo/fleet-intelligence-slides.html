@@ -26,9 +26,12 @@
     button { font: inherit; }
 
     #deck {
+      position: fixed;
+      top: 0;
+      left: 0;
       width: 1920px;
       height: 1080px;
-      transform-origin: center;
+      transform-origin: top left;
     }
 
     .slide {
@@ -871,10 +874,16 @@ postdeploy health requires:
     function fit() {
       const deck = document.getElementById('deck');
       if (rendering) {
+        deck.style.left = '0';
+        deck.style.top = '0';
         deck.style.transform = 'none';
         return;
       }
-      const scale = Math.min(innerWidth / 1920, innerHeight / 1080);
+      const viewportWidth = document.documentElement.clientWidth;
+      const viewportHeight = document.documentElement.clientHeight;
+      const scale = Math.min(viewportWidth / 1920, viewportHeight / 1080);
+      deck.style.left = `${(viewportWidth - 1920 * scale) / 2}px`;
+      deck.style.top = `${(viewportHeight - 1080 * scale) / 2}px`;
       deck.style.transform = `scale(${scale})`;
     }
 

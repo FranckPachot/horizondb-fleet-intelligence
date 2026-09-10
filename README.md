@@ -33,9 +33,11 @@ shared list and Leaflet map, with scores and execution plans available as eviden
 
 ## Technical Demo
 
-The [customer demo package](demo/README.md) contains the final narrated video,
-the [PowerPoint recording deck](demo/fleet-intelligence-demo.pptx) with presenter
-notes and embedded live-demo clips, the
+The primary goal of this project is to deliver the end-to-end experience shown
+in the [live Fleet Intelligence demo recording](demo/fleet-intelligence-demo-live.mp4).
+The [customer demo package](demo/README.md) also contains the
+[PowerPoint recording deck](demo/fleet-intelligence-demo.pptx) with presenter
+notes and embedded demo clips, the
 [16-slide HTML presentation](demo/fleet-intelligence-slides.html), and the live
 application and plan captures. Internal production automation remains excluded
 from Git.
