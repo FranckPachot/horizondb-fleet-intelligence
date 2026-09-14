@@ -88,8 +88,9 @@ WITH pending AS (
 UPDATE horizon_ship.shipments AS shipment
 SET embedding = azure_openai.create_embeddings(
     %s,
-    concat_ws(
-        ' ',
+    format(
+        'Title: %%s. Description: %%s. Origin: %%s. Destination: %%s. '
+        'Current location: %%s. Status: %%s. Metadata: %%s.',
         shipment.title,
         shipment.description,
         shipment.origin_name,

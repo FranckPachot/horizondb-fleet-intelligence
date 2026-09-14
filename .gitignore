@@ -37,3 +37,4 @@ demo/work/
 
 # Private research, provenance, and production inputs
 internal/
+.copilot-specs-cache/

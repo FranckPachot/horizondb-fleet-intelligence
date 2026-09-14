@@ -1,16 +1,16 @@
 # Two Ways to Ask One Database: PostGIS and AI Retrieval in Azure HorizonDB
 
-![Architecture: the horizon_ship.shipments table with relational columns served by B-tree indexes, PostGIS geometry columns served by GiST indexes, and a pgvector embedding column served by a spherical-quantized DiskANN index. Two query paths, a deterministic criteria search and a prompt-only gpt-5.4 agent, both feed one shared SQL query that combines all three data types into a hybrid score.](media/cover-architecture.svg)
+![Architecture: the horizon_ship.shipments table with relational columns served by B-tree indexes, PostGIS geometry columns served by GiST indexes, and a pgvector embedding column served by a spherical-quantized DiskANN index. Two query paths, a deterministic criteria search and a prompt-only gpt-5.4 agent, both feed one shared SQL query that combines all three data types into a hybrid score.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/cover-architecture.svg)
 
 Fleet operators rarely search with a single kind of question. Sometimes they know exactly what they want: delayed shipments, within a certain radius of a location, arriving in a given window. Other times they only have intent, phrased in a sentence: "which delayed shipments need attention?" The first case is a deterministic filter. The second is a semantic search that a language model can shape into a query. Both need to run against the same operational data, return the same kind of exact rows, and stay inspectable enough that an operator can trust the result.
 
 The usual answer is to split that data: keep the transactional and spatial rows in one system and copy embeddings into a separate vector store, with a search service in front. That works, but it duplicates the data, adds a synchronization problem, and hides the retrieval behind an API that no longer shows how a result was reached.
 
-The goal here is to keep both kinds of question against one database. I built a small sample application, HorizonDB Fleet Intelligence, that tracks 24 global shipments and answers them two ways: a criteria search form on the left, and a prompt-only assistant on the right. Both call the same repository, both use PostGIS for location and pgvector for meaning, and both expose the exact SQL and execution plan that produced their rows. This post walks through the goal, the two paths, and the queries and execution plans behind each. The interesting part is not that PostgreSQL can call an AI model; it is that the whole retrieval workflow, spatial filtering, vector ranking, and model reasoning, stays next to the data and remains readable.
+The goal here is to keep both kinds of question against one database. I built a sample application, HorizonDB Fleet Intelligence, that answers them two ways: a criteria search form on the left, and a prompt-only assistant on the right. Its 24 global shipments are a deliberately small, hand-authored demo fixture, not a scale benchmark. Keeping the dataset small makes every returned row and planner choice easy to inspect. Both paths call the same repository, use PostGIS for location and pgvector for meaning, and expose the exact SQL and execution plan that produced their rows. This post walks through the goal, the two paths, and the queries and execution plans behind each. The interesting part is not that PostgreSQL can call an AI model. It is that the whole retrieval workflow, spatial filtering, vector ranking, and model reasoning, stays next to the data and remains readable.
 
-![Fleet Intelligence console: the criteria workbench on the left, a shared Leaflet map in the center, and the Agent Framework assistant on the right. The header confirms HorizonDB, PostGIS, SQ4 DiskANN, and Agent Framework are all live.](media/app-overview.png)
+![Fleet Intelligence console: the criteria workbench on the left, a shared Leaflet map in the center, and the Agent Framework assistant on the right. The header confirms HorizonDB, PostGIS, SQ4 DiskANN, and Agent Framework are all live.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-overview.png)
 
-I ran this on Azure HorizonDB (preview), PostgreSQL 17.11, with `postgis` 3.6.1, `vector` 0.8.0, `pg_diskann` 0.7.3, and `azure_ai` 2.2.2 enabled, and both model aliases registered. HorizonDB is a preview service, so region and subscription availability can change, and the plans and numbers below reflect what I ran rather than a support statement.
+I ran this on Azure HorizonDB (preview), PostgreSQL 17.11, with `postgis` 3.6.1, `vector` 0.8.0, `pg_diskann` 0.7.3, and `azure_ai` 2.2.2 enabled. Both model aliases were registered with HorizonDB AI Model Management (AIMM). HorizonDB is a preview service, so region and subscription availability can change, and the plans and numbers below reflect what I ran rather than a support statement.
 
 ## The data model
 
@@ -51,7 +51,7 @@ CREATE INDEX shipments_eta_idx
     ON horizon_ship.shipments (eta);
 ```
 
-The vector index is DiskANN with HorizonDB's spherical quantization preview: four-bit codes trained on 25,000 samples, using cosine distance to match the embedding model.
+The vector index combines DiskANN with HorizonDB's spherical quantization (SQ) preview. DiskANN navigates a nearest-neighbor graph instead of scanning every vector. SQ compresses vector directions into low-bit representations, reducing the index footprint and memory traffic during graph traversal at the cost of an approximate comparison. Here each component uses four bits, shown as SQ4 in the interface, and `sq_training_samples` is configured at 25,000. Cosine distance matches the embedding model.
 
 ```sql
 CREATE INDEX shipments_embedding_diskann_idx
@@ -64,14 +64,25 @@ CREATE INDEX shipments_embedding_diskann_idx
     );
 ```
 
-The embeddings themselves come from HorizonDB's model registry, so I do not deploy or register a model by hand. The `default-embedding` alias resolves to `text-embedding-3-small` (1,536 dimensions), and `default-chat` resolves to `gpt-5.4`. Setup generates each row's embedding inside the database from the shipment's business fields:
+### AI Model Management and `azure_ai`
+
+Both aliases are registered with HorizonDB AI Model Management (AIMM). The `default-embedding` alias resolves to `text-embedding-3-small` with 1,536 dimensions, and `default-chat` resolves to `gpt-5.4`. Using aliases keeps the SQL and application code independent of the underlying model deployment details.
+
+The `azure_ai` extension provides the in-database model integration used by both paths:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS azure_ai CASCADE;
+```
+
+Setup calls `azure_openai.create_embeddings` to create each row's embedding inside the database. The prompt-only agent later calls `azure_ai.generate` through its Agent Framework adapter. The embedding input uses `format()` with field labels, giving the model the business role of each value instead of an unlabeled sequence of words:
 
 ```sql
 UPDATE horizon_ship.shipments AS shipment
 SET embedding = azure_openai.create_embeddings(
     'default-embedding',
-    concat_ws(
-        ' ',
+    format(
+        'Title: %s. Description: %s. Origin: %s. Destination: %s. '
+        'Current location: %s. Status: %s. Metadata: %s.',
         shipment.title,
         shipment.description,
         shipment.origin_name,
@@ -84,15 +95,15 @@ SET embedding = azure_openai.create_embeddings(
 WHERE ...;
 ```
 
-No embeddings leave the database, and no separate vector store is involved.
+The application does not move embeddings between services, and no separate vector store is involved.
 
 ## Two paths, one repository
 
 The interface separates two kinds of work on purpose. On the left, a criteria workbench posts a prompt plus explicit status, ETA window, map center, and radius to `POST /api/search`. That is a deterministic form, not a chat. On the right, the operator sends only a natural-language question to `POST /api/chat`, and Microsoft Agent Framework lets `gpt-5.4` choose the arguments for one typed tool.
 
-The important design decision is that both paths call the **same** repository method, `semantic_search`. The criteria path fills in the filters from the form; the agent path fills them in from what the model inferred. Nothing from the left form leaks into the agent request, and the agent request contract enforces that: the `/api/chat` model forbids extra fields, so posting status or radius to it returns HTTP 422 before Agent Framework even runs.
+The important design decision is that both paths call the **same** repository method, `semantic_search`. The criteria path fills in the filters from the form. The agent path fills them in from what the model inferred. Nothing from the left form leaks into the agent request, and the agent request contract enforces that: the `/api/chat` model forbids extra fields, so posting status or radius to it returns HTTP 422 before Agent Framework even runs.
 
-Here is the shared query, exactly as the repository builds it (the `%s` placeholders are bound with parameters; the criteria path supplies real values, the agent path passes `NULL` for the filters it did not infer):
+Here is the shared query, exactly as the repository builds it. The `%s` placeholders are bound with parameters. The criteria path supplies real values, while the agent path passes `NULL` for the filters it did not infer.
 
 ```sql
 -- 1. Embed the query text in the database, using the same model
@@ -168,9 +179,7 @@ A few things are worth pointing out. The query embedding is created inside Horiz
 
 ### Why 72% semantic and 28% spatial
 
-The weighting is a deliberate product choice, not a mathematical constant. Both terms are first normalized to the same 0-to-1 scale so they can be added: cosine similarity is `1 - vector_distance`, and the spatial term is `GREATEST(0, 1 - distance_km / radius)`, which is 1 at the exact center and falls linearly to 0 at the edge of the requested radius (and is clamped at 0 beyond it). Without normalization, a distance measured in kilometers and a cosine value between 0 and 1 could not be combined meaningfully.
-
-Meaning is weighted higher than proximity because the operator has already expressed proximity as a hard filter: the `ST_DWithin` predicate has removed everything outside the radius, so every surviving candidate is "close enough" by definition. Inside that set, what should break ties is how well the cargo matches the intent, not which shipment happens to sit a few kilometers nearer the center. The 28% spatial weight still rewards proximity, so a strong semantic match right next to the center outranks an equally strong match at the far edge, but it does not let raw distance override a clearly better cargo match. The exact split is easy to tune; the principle is that relevance leads and proximity refines. When there is no radius at all, as on the agent path, the spatial term is dropped entirely and the score is pure similarity.
+The split is a tunable product choice, not a mathematical constant. Both terms are normalized from 0 to 1. Because `ST_DWithin` already removes rows outside the radius, semantic relevance leads among the eligible shipments and the 28% spatial term rewards proximity. Without a radius, the score is pure cosine similarity.
 
 Because the two paths share this query, the only thing that changes between them is which parameters are `NULL`. That is what makes the execution plans interesting: the same SQL shape produces two very different plans depending on how selective the filters are.
 
@@ -178,7 +187,7 @@ Because the two paths share this query, the only thing that changes between them
 
 For the first search I ask for cold-chain medicine for clinics, select the `exception` status, center the map near Dakar in West Africa, and choose a 3,000-kilometer radius. This is a highly selective request. In the sample data it returns exactly one row: SHIP-0007, Cold-Chain Vaccines. The cosine similarity is 0.56 and the hybrid score is 0.69. No model reasoning is needed to interpret those explicit filters.
 
-![Criteria search: status set to Exception, a 3,000 km radius drawn on the map near Dakar, and one result, SHIP-0007 Cold-Chain Vaccines, with a cos 0.56 badge.](media/app-criteria-result.png)
+![Criteria search: status set to Exception, a 3,000 km radius drawn on the map near Dakar, and one result, SHIP-0007 Cold-Chain Vaccines, with a cos 0.56 badge.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-criteria-result.png)
 
 The application does not force an index. Every runtime `SELECT` is first run through `EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT TEXT)`, and the plan is retained alongside the literalized SQL. For this selective request, the planner does not touch the vector index at all. It combines the status B-tree and the PostGIS geography GiST index with a `BitmapAnd`, feeds one row into a Bitmap Heap Scan, and rechecks `ST_DWithin` there:
 
@@ -194,23 +203,23 @@ The application does not force an index. Every runtime `SELECT` is first run thr
                   Index Cond: ((current_position)::geography && _st_expand('...'::geography, '3000000'::double precision))
 ```
 
-This is the right call. The status B-tree returns two candidate rows, the geography GiST index returns three, and the `BitmapAnd` intersects them; the `ST_DWithin` recheck on the heap confirms the single match. Resolving that with relational and spatial selectivity is far cheaper than an approximate nearest-neighbor scan, and the whole query ran in about 22 ms. The vector distance is still computed in the outer query to produce the similarity and hybrid score, but it is not driving the access path. The SQL pane shows every literal, prompt, status, coordinates, and radius, so the operator can see exactly what was asked and how it was answered.
+This is the right call. The status B-tree returns two candidate rows, the geography GiST index returns three, and the `BitmapAnd` intersects them. The `ST_DWithin` recheck on the heap confirms the single match. Resolving that with relational and spatial selectivity is far cheaper than an approximate nearest-neighbor scan, and the whole query ran in about 22 ms. The vector distance is still computed in the outer query to produce the similarity and hybrid score, but it is not driving the access path. The SQL pane shows every literal, prompt, status, coordinates, and radius, so the operator can see exactly what was asked and how it was answered.
 
 Note that the GiST index scan uses the `&&` bounding-box operator against `_st_expand(...)`, which is the index-friendly part of `ST_DWithin`. The exact distance test is then applied as the recheck, so the spatial predicate is both index-accelerated and exact.
 
 The application shows the same thing as a graph, with the literal SQL beside it. The `BitmapAnd` and its two bitmap index scans are visible as one flow, and the SQL pane highlights each user-supplied literal:
 
-![The plan viewer: the literal SQL on the left with the query text highlighted, and the plan graph on the right showing the Bitmap Heap Scan feeding from a BitmapAnd.](media/app-criteria-plan.png)
+![The plan viewer: the literal SQL on the left with the query text highlighted, and the plan graph on the right showing the Bitmap Heap Scan feeding from a BitmapAnd.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-criteria-plan.png)
 
 ## Path two: the prompt-only agent
 
 For the second search I clear the left criteria and just ask the assistant: "Which delayed shipments need attention?" The request body contains only that question.
 
-![The agent panel returns three cards, Electric Vehicles, Apparel and Textiles, and Lithium Batteries, each marked Delayed with cos and hybrid scores. The header reads gpt-5.4, Agent Framework, PostGIS + SQ4 DiskANN, and a Query + plan button is available.](media/app-agent-result.png)
+![The agent panel returns three cards, Electric Vehicles, Apparel and Textiles, and Lithium Batteries, each marked Delayed with cos and hybrid scores. The header reads gpt-5.4, Agent Framework, PostGIS + SQ4 DiskANN, and a Query + plan button is available.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-agent-result.png)
 
 Behind that, Microsoft Agent Framework runs a bounded two-turn loop while model inference stays inside HorizonDB. On the first turn, `gpt-5.4` is asked, through `azure_ai.generate`, to return JSON arguments for a single registered tool, `search_shipments`. The model chooses `delayed` as the status and rewrites the intent to something like "shipments needing attention". Agent Framework validates those arguments and invokes the tool exactly once. That tool calls the same `semantic_search` method, with the model-chosen status and no spatial or ETA filter. On the second turn, the model receives only the serialized result rows and writes the grounded answer. The client caps the run at two model iterations and one function call, so the orchestration stays predictable.
 
-The tool is a plain typed function; the framework reads its schema from the annotations:
+The tool is a plain typed function. The framework reads its schema from the annotations:
 
 ```python
 @tool(
@@ -245,11 +254,11 @@ The plan is now a custom DiskANN scan. Strict iterative search applies the `dela
       TIDs Collected: 3 count
 ```
 
-The strategy line reads `Filter(SeqScan) -> Vector`: the `delayed` filter is applied first, then the vector index orders the survivors. It collected three tuple identifiers and retrieved three rows, and the whole statement ran in about 1.2 ms. Those three rows, Electric Vehicles, Apparel and Textiles, and Lithium Batteries, are the same rows that appear as cards in the answer, in the left-hand list, and on the map. The query pane exposes the model-selected semantic phrase and the cosine operator, so the vector path is as inspectable as the relational one. Filtered vector search is exactly what a separate vector store tends to hide; here it stays in the plan.
+The strategy line reads `Filter(SeqScan) -> Vector`: the `delayed` filter is applied first, then the vector index orders the survivors. It collected three tuple identifiers and retrieved three rows, and the whole statement ran in about 1.2 ms. Those three rows, Electric Vehicles, Apparel and Textiles, and Lithium Batteries, are the same rows that appear as cards in the answer, in the left-hand list, and on the map. The query pane exposes the model-selected semantic phrase and the cosine operator, so the vector path is as inspectable as the relational one. Filtered vector search is exactly what a separate vector store tends to hide. Here it stays in the plan.
 
 The plan graph makes the strategy explicit. The `Query + plan` button on the agent turn opens the exact SQL the model produced, "shipments needing attention" highlighted, next to the `DiskANNFilteredScan` node with its strategy and TID count:
 
-![The plan viewer for the agent turn: the literal SQL with the model-chosen phrase highlighted, and the plan graph showing Custom Scan (DiskANNFilteredScan), Strategy Filter(SeqScan) to Vector, and TIDs Collected 3 count.](media/app-agent-plan.png)
+![The plan viewer for the agent turn: the literal SQL with the model-chosen phrase highlighted, and the plan graph showing Custom Scan (DiskANNFilteredScan), Strategy Filter(SeqScan) to Vector, and TIDs Collected 3 count.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-agent-plan.png)
 
 Both plans come from the identical query. The criteria request was selective, so the planner chose `BitmapAnd` over the status B-tree and geography GiST. The agent request was broad, so the planner chose `DiskANNFilteredScan` and let the vector index order the candidates. That is the payoff of keeping one query and one dataset: the planner adapts to the shape of each question instead of the application hard-coding an access path.
 
@@ -257,7 +266,7 @@ Both plans come from the identical query. The criteria request was selective, so
 
 These two access paths look different in the plan, but they are solving the same problem the same way: reduce the table to the set of rows that satisfy the predicates, expressed as tuple identifiers (TIDs), the physical `(block, offset)` addresses of rows.
 
-In the criteria plan, each index produces a bitmap of TIDs. The status B-tree contributes the TIDs of `exception` rows, the geography GiST index contributes the TIDs whose bounding box intersects the radius, and `BitmapAnd` intersects the two bitmaps into the TIDs that satisfy both. The heap is then visited for exactly those TIDs and the exact `ST_DWithin` is rechecked. The predicates are resolved first; the rows come last.
+In the criteria plan, each index produces a bitmap of TIDs. The status B-tree contributes the TIDs of `exception` rows, the geography GiST index contributes the TIDs whose bounding box intersects the radius, and `BitmapAnd` intersects the two bitmaps into the TIDs that satisfy both. The heap is then visited for exactly those TIDs and the exact `ST_DWithin` is rechecked. The predicates are resolved first, then the rows are fetched.
 
 The DiskANN filtered scan does the equivalent, but in the opposite order and against a graph. Rather than ordering by distance and hoping the top results happen to be `delayed`, strict iterative search evaluates the filter *during* graph navigation: as it walks the nearest-neighbor graph it keeps only the TIDs that pass the `delayed` predicate, and keeps walking until it has collected enough matches in nearest-first order. That is what `Filter(SeqScan) -> Vector` and `TIDs Collected: 3` describe, the filter builds the set of eligible TIDs, and the vector index visits them in similarity order.
 
@@ -274,4 +283,3 @@ This started as a practical customer question: show PostGIS on HorizonDB, then c
 When the operator knows the criteria, the left workflow keeps status, time, and geography deterministic, and the planner resolves it with B-tree and GiST bitmaps. When the intent is conversational, `gpt-5.4` gets one controlled Agent Framework tool over the same repository, and the planner serves it from spherical-quantized DiskANN. In both cases the rows, scores, SQL literals, and planner decisions stay visible. Relational data, PostGIS geometry, pgvector embeddings, and AI model calls all live in the same HorizonDB instance, so there is no second store to synchronize and no retrieval hidden behind an opaque service.
 
 The pattern starts with shipment tracking but transfers directly to fleet, taxi, bus, and security dispatch, anywhere service intent and proximity matter together. If you want to try HorizonDB capabilities like these, the PostgreSQL Hub has sample applications and learning paths, and the PostgreSQL Developer Forum is the best place to share feedback and ask questions.
-```

@@ -3,6 +3,7 @@ from typing import Any, Self
 from app.config import Settings
 from app.sample_data import build_sample_shipments
 from app.setup_database import (
+    EMBED_BATCH_SQL,
     PRIMARY_INDEX_SQL,
     shipment_parameters,
     verify_embedding_model,
@@ -66,6 +67,13 @@ def test_seed_parameters_use_postgis_longitude_latitude_order() -> None:
         shipment.current_position.longitude,
         shipment.current_position.latitude,
     )
+
+
+def test_embedding_input_formats_business_field_context() -> None:
+    assert EMBED_BATCH_SQL.count("%%s") == 7
+    assert "Title: %%s. Description: %%s." in EMBED_BATCH_SQL
+    assert "Origin: %%s. Destination: %%s." in EMBED_BATCH_SQL
+    assert "Current location: %%s. Status: %%s. Metadata: %%s." in EMBED_BATCH_SQL
 
 
 def test_primary_diskann_index_uses_spherical_quantization() -> None:
