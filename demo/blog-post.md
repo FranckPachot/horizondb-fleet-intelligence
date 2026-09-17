@@ -10,6 +10,14 @@ The goal here is to keep both kinds of question against one database. I built a 
 
 ![Fleet Intelligence console: the criteria workbench on the left, a shared Leaflet map in the center, and the Agent Framework assistant on the right. The header confirms HorizonDB, PostGIS, SQ4 DiskANN, and Agent Framework are all live.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-overview.png)
 
+This sample demonstrates:
+
+- One operational PostgreSQL database
+- PostGIS for spatial filtering
+- pgvector and DiskANN for semantic retrieval
+- Agent Framework for prompt-driven search
+- Full SQL and execution-plan visibility
+
 I ran this on Azure HorizonDB (preview), PostgreSQL 17.11, with `postgis` 3.6.1, `vector` 0.8.0, `pg_diskann` 0.7.3, and `azure_ai` 2.2.2 enabled. Both model aliases were registered with HorizonDB AI Model Management (AIMM). HorizonDB is a preview service, so region and subscription availability can change, and the plans and numbers below reflect what I ran rather than a support statement.
 
 ## The data model
@@ -99,7 +107,17 @@ The application does not move embeddings between services, and no separate vecto
 
 ## Two paths, one repository
 
-The interface separates two kinds of work on purpose. On the left, a criteria workbench posts a prompt plus explicit status, ETA window, map center, and radius to `POST /api/search`. That is a deterministic form, not a chat. On the right, the operator sends only a natural-language question to `POST /api/chat`, and Microsoft Agent Framework lets `gpt-5.4` choose the arguments for one typed tool.
+The interface shown above has three panes: a criteria workbench on the left, a shared map in the center, and a prompt-only assistant on the right:
+
+- Criteria workbench (left)
+   - Explicit status, ETA, and radius filters
+   - Calls POST /api/search
+   - This is a deterministic form, not a chat
+
+- Agent assistant (right)
+   - Natural-language question only
+   - Calls POST /api/chat
+   - Agent Framework lets `gpt-5.4` infer tool arguments
 
 The important design decision is that both paths call the **same** repository method, `semantic_search`. The criteria path fills in the filters from the form. The agent path fills them in from what the model inferred. Nothing from the left form leaks into the agent request, and the agent request contract enforces that: the `/api/chat` model forbids extra fields, so posting status or radius to it returns HTTP 422 before Agent Framework even runs.
 
