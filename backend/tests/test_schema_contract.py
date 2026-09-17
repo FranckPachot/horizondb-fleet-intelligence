@@ -31,6 +31,7 @@ def test_repository_combines_postgis_diskann_and_hybrid_ranking() -> None:
     assert "spherical_quantized=true" in repository
     assert "sq_bits=4" in repository
     assert "sq_training_samples=25000" in repository
+    assert "SET LOCAL plan_cache_mode TO 'force_custom_plan'" in repository
     assert "ST_DWithin" in repository
     assert "ORDER BY s.embedding <=> query_vector.embedding" in repository
     assert "0.72 * (1 - vector_distance)" in repository

@@ -433,6 +433,7 @@ LIMIT %s;
         ]
         async with self._pool.connection() as connection, connection.transaction():
             for setting in (
+                "SET LOCAL plan_cache_mode TO 'force_custom_plan'",
                 "SET LOCAL diskann.iterative_search TO 'strict_order'",
                 "SET LOCAL diskann.enable_filter_hook TO 'true'",
                 "SET LOCAL diskann.selectivity_min TO '0.0'",

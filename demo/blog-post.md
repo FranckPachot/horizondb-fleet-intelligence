@@ -1,12 +1,12 @@
 # Two Ways to Ask One Database: PostGIS and AI Retrieval in Azure HorizonDB
 
-![Architecture: the horizon_ship.shipments table with relational columns served by B-tree indexes, PostGIS geometry columns served by GiST indexes, and a pgvector embedding column served by a spherical-quantized DiskANN index. Two query paths, a deterministic criteria search and a prompt-only gpt-5.4 agent, both feed one shared SQL query that combines all three data types into a hybrid score.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/cover-architecture.svg)
+![Fleet Intelligence cover showing the shipment map and search interface under magnifying lenses that reveal a Bitmap Heap Scan, the hybrid scoring formula, and a filtered DiskANN scan.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/cover-lens.png)
 
 Fleet operators rarely search with a single kind of question. Sometimes they know exactly what they want: delayed shipments, within a certain radius of a location, arriving in a given window. Other times they only have intent, phrased in a sentence: "which delayed shipments need attention?" The first case is a deterministic filter. The second is a semantic search that a language model can shape into a query. Both need to run against the same operational data, return the same kind of exact rows, and stay inspectable enough that an operator can trust the result.
 
-The usual answer is to split that data: keep the transactional and spatial rows in one system and copy embeddings into a separate vector store, with a search service in front. That works, but it duplicates the data, adds a synchronization problem, and hides the retrieval behind an API that no longer shows how a result was reached.
+The usual answer is to split that data: keep the transactional and, maybe, spatial rows in one system and copy embeddings into a separate vector store, with a search service in front. That works, but it duplicates the data, adds a synchronization problem, and hides the retrieval behind an API that no longer shows how a result was reached.
 
-The goal here is to keep both kinds of question against one database. I built a sample application, HorizonDB Fleet Intelligence, that answers them two ways: a criteria search form on the left, and a prompt-only assistant on the right. Its 24 global shipments are a deliberately small, hand-authored demo fixture, not a scale benchmark. Keeping the dataset small makes every returned row and planner choice easy to inspect. Both paths call the same repository, use PostGIS for location and pgvector for meaning, and expose the exact SQL and execution plan that produced their rows. This post walks through the goal, the two paths, and the queries and execution plans behind each. The interesting part is not that PostgreSQL can call an AI model. It is that the whole retrieval workflow, spatial filtering, vector ranking, and model reasoning, stays next to the data and remains readable.
+The goal here is to keep both kinds of question against one database. I built a sample application, [HorizonDB Fleet Intelligence](https://github.com/FranckPachot/horizondb-fleet-intelligence), that answers them two ways: a criteria search form on the left, and a prompt-only assistant on the right. Its 24 global shipments are a deliberately small, hand-authored demo fixture, not a scale benchmark. Keeping the dataset small makes every returned row and planner choice easy to inspect. Both paths call the same repository, use PostGIS for location and pgvector for meaning, and expose the exact SQL and execution plan that produced their rows. This post walks through the goal, the two paths, and the queries and execution plans behind each. The interesting part is not that PostgreSQL can call an AI model. It is that the whole retrieval workflow, spatial filtering, vector ranking, and model reasoning, stays next to the data and remains readable.
 
 ![Fleet Intelligence console: the criteria workbench on the left, a shared Leaflet map in the center, and the Agent Framework assistant on the right. The header confirms HorizonDB, PostGIS, SQ4 DiskANN, and Agent Framework are all live.](https://raw.githubusercontent.com/FranckPachot/horizondb-fleet-intelligence/main/demo/media/app-overview.png)
 
@@ -138,7 +138,8 @@ candidates AS MATERIALIZED (
     FROM horizon_ship.shipments AS s
     CROSS JOIN query_vector
     -- 2c. Optional filters. Each is "parameter IS NULL OR <condition>",
-    --     so an unused filter drops out and the planner can ignore it.
+    --     so an unused filter drops out and the planner can ignore it
+    --     (the application sets plan_cache_mode to force_custom_plan).
     WHERE (%s::text IS NULL OR s.status = %s)          -- status
         AND (                                          -- ETA window
             %s::date IS NULL
