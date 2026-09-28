@@ -32,8 +32,12 @@ Thumbs.db
 infra/main.json
 infra/modules/*.json
 
-# Demo video intermediates
-demo/work/
+# Generated demo presentation package
+/demo/README.md
+/demo/fleet-intelligence-demo-*.mp4
+/demo/fleet-intelligence-demo*.pptx
+/demo/fleet-intelligence-slides.html
+/demo/presenter-notes.md
 
 # Private research, provenance, and production inputs
 internal/
